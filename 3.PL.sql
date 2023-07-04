@@ -10,7 +10,7 @@ SET x = 5;
 
 SET (a, b, c) = (1 + 3, 'foo', false);
 
---DECLARE, SET example
+--Example1
 DECLARE target_word STRING DEFAULT 'methinks';
 DECLARE corpus_count, word_count INT64;
 
@@ -80,3 +80,48 @@ DROP TABLE tmp;
 
 COMMIT TRANSACTION;
 
+--Example2
+declare fill_period int64 default 3;
+
+begin
+  declare min_date date;
+  declare max_date date;
+
+  -- 1. 현재 add_to_cart 테이블 기록 확인
+  execute immediate """
+    select min(date), max(date) from temp.add_to_cart
+  """
+  into min_date, max_date;
+
+  -- 2. 마지막 기록일로부터 n일간 데이터 가져오기
+  create temp table recent_data as 
+    select 
+      date(timestamp_micros(event_timestamp)) date,
+      item_id,
+      item_name,
+      count(distinct user_pseudo_id) user_count 
+    from
+      `bigquery-public-data.ga4_obfuscated_sample_ecommerce.events_*`, 
+      unnest(items)
+    where
+      _table_suffix between format_date('%Y%m%d', max_date+1) and format_date('%Y%m%d', max_date+1+fill_period)
+      and event_name = 'add_to_cart'
+    group by 1, 2, 3
+  ;
+
+  -- 3. 테이블 머지
+  merge temp.add_to_cart as a 
+  using recent_data as r 
+  on a.date = r.date and a.item_id = r.item_id and a.item_name = r.item_name
+  when not matched then 
+    insert(date, item_id, item_name, user_count)
+    values(date, item_id, item_name, user_count)
+  when matched then 
+    update set user_count = r.user_count;
+  
+  -- 4. 임시 테이블 삭제 
+  drop table recent_data;
+
+  -- 5. 업데이트 기록 확인
+  select min(date), max(date) from temp.add_to_cart;
+end;
