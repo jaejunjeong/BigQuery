@@ -45,3 +45,20 @@ AS
   WHERE year = y
   GROUP BY year, name
 
+--EXAMPLE1
+create temp function get_value(params any type, key string) as (
+  (select value.string_value from unnest(params) where key = key)
+);
+
+select
+  event_timestamp,
+  event_params,
+  (select value.string_value from unnest(event_params) where key='page_location'),
+  get_value(event_params, 'page_location')
+from
+  `bigquery-public-data.ga4_obfuscated_sample_ecommerce.events_*` 
+where
+  event_name = 'add_to_cart'
+  and _table_suffix between 
+    format_date('%Y%m%d', date_sub(end_dt, interval 2 day)) 
+    and format_date('%Y%m%d', end_dt)
